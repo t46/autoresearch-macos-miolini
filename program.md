@@ -87,6 +87,56 @@ c3d4e5f	1.005000	44.0	discard	switch to GeLU activation
 d4e5f6g	0.000000	0.0	crash	double model width (OOM)
 ```
 
+## Pre-experiment guard rail (Negative Result Repository)
+
+Before you actually edit `train.py` for a new experiment, you must consult the
+Negative Result Repository (NRR) at `~/dev/negative-result-repository`. NRR
+holds structured records of past failed autoresearch experiments and can warn
+you when your idea looks like one that has already been tried and failed. The
+goal is to spend your 5-minute training budget on ideas that haven't already
+been disproved.
+
+The flow is:
+
+1. Decide what you are about to change.
+2. Write a one-line description (and optionally the `KEY = value` lines you
+   plan to introduce) to `/tmp/proposal.txt`. Example:
+
+   ```bash
+   cat > /tmp/proposal.txt <<'EOF'
+   Increase LR to 0.05 to speed convergence
+   LEARNING_RATE = 0.05
+   EOF
+   ```
+
+3. Run:
+
+   ```bash
+   uv run --directory ~/dev/negative-result-repository \
+       nrr check --proposal-file /tmp/proposal.txt
+   ```
+
+4. Read the JSON `verdict` field on stdout:
+   - `proceed` — no strong prior failures. Go ahead with the edit.
+   - `caution` — similar things have failed; proceed but mention the warning
+     in the `description` column of `results.tsv` so future analyses can
+     correlate.
+   - `avoid` — the database has high-confidence evidence that this direction
+     fails. Pick a different idea instead of running the experiment.
+
+If NRR is missing or errors out, log the error and continue — it is advisory,
+not a blocker. NRR's seed data is currently from a CIFAR-10 CNN workload, so
+its judgments on GPT-specific architecture changes are weak; treat it as a
+hyperparameter sanity check rather than an oracle.
+
+**M1 Pro 16GB note:** This fork runs on Apple Silicon via PyTorch MPS, not
+CUDA. If you hit MPS OOM (e.g. `MPS backend out of memory`) during a run,
+you have full authority to shrink the workload yourself in `train.py`:
+lower `DEPTH`, `DEVICE_BATCH_SIZE`, model width, or other knobs. Note that
+`prepare.py` (including `MAX_SEQ_LEN` and `EVAL_TOKENS`) is read-only — do
+not edit it. Log such reductions as a `crash` row in `results.tsv` with a
+clear description, then retry with the smaller config.
+
 ## The experiment loop
 
 The experiment runs on a dedicated branch (e.g. `autoresearch/mar5` or `autoresearch/mar5-gpu0`).
@@ -94,14 +144,17 @@ The experiment runs on a dedicated branch (e.g. `autoresearch/mar5` or `autorese
 LOOP FOREVER:
 
 1. Look at the git state: the current branch/commit we're on
-2. Tune `train.py` with an experimental idea by directly hacking the code.
-3. git commit
-4. Run the experiment: `uv run train.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
-5. Read out the results: `grep "^val_bpb:\|^peak_vram_mb:" run.log`
-6. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
-7. Record the results in the tsv
-8. If val_bpb improved (lower), you "advance" the branch, keeping the git commit
-9. If val_bpb is equal or worse, you git reset back to where you started
+2. Decide on an experimental idea, then run the NRR pre-check (see
+   "Pre-experiment guard rail" above). If `verdict` is `avoid`, pick a
+   different direction and re-check before editing.
+3. Tune `train.py` with the (possibly revised) experimental idea by directly hacking the code.
+4. git commit
+5. Run the experiment: `uv run train.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
+6. Read out the results: `grep "^val_bpb:\|^peak_vram_mb:" run.log`
+7. If the grep output is empty, the run crashed. Run `tail -n 50 run.log` to read the Python stack trace and attempt a fix. If you can't get things to work after more than a few attempts, give up.
+8. Record the results in the tsv
+9. If val_bpb improved (lower), you "advance" the branch, keeping the git commit
+10. If val_bpb is equal or worse, you git reset back to where you started
 
 The idea is that you are a completely autonomous researcher trying things out. If they work, keep. If they don't, discard. And you're advancing the branch so that you can iterate. If you feel like you're getting stuck in some way, you can rewind but you should probably do this very very sparingly (if ever).
 

@@ -81,6 +81,38 @@ If you're going to be using autoresearch on Apple Macbooks in particular, I'd re
 - [miolini/autoresearch-macos](https://github.com/miolini/autoresearch-macos)
 - [trevin-creator/autoresearch-mlx](https://github.com/trevin-creator/autoresearch-mlx)
 
+## Fork note: Negative Result Repository integration
+
+This fork (`t46/autoresearch-macos-miolini`) sits on top of
+`miolini/autoresearch-macos` (PyTorch + MPS for Apple Silicon) and adds a
+single change: `program.md` now instructs the agent to consult the
+[Negative Result Repository](https://github.com/t46/negative-result-repository)
+(NRR) before each `train.py` edit. The agent writes its planned change to
+`/tmp/proposal.txt` and runs:
+
+```bash
+uv run --directory ~/dev/negative-result-repository \
+    nrr check --proposal-file /tmp/proposal.txt
+```
+
+NRR returns a JSON `verdict` (`proceed` / `caution` / `avoid`) plus the most
+similar past failures. The agent then chooses to go ahead, log a warning, or
+pick a different direction. See the new "Pre-experiment guard rail" section in
+`program.md`.
+
+**Caveat (seed mismatch):** NRR's seed database is currently 21 CIFAR-10 CNN
+experiments from `autoresearch-lite`. Generic hyperparameter judgments (e.g.
+"don't 10x the LR") transfer; nanochat-style architecture judgments do not.
+Treat the verdict as advisory until a GPT-side seed is collected by running
+this fork for some hours and feeding the resulting `results.tsv` back into
+NRR.
+
+**M1 Pro 16GB caveat (MPS OOM):** This fork is intended for Apple Silicon.
+On a 16GB M1 Pro the upstream defaults may OOM. The agent has explicit
+authority (see `program.md` → "Pre-experiment guard rail") to shrink
+`DEPTH`, `DEVICE_BATCH_SIZE`, or model width in `train.py` when this
+happens, log the crash row, and retry with the smaller config.
+
 ## License
 
 MIT
